@@ -16,6 +16,7 @@ services:
       WIRED_DATA_DIR: "/app/data"
       FEED_SNAPSHOT_CACHE_FILE: "/app/data/feed-bootstrap.json"
       WIRED_MODERATION_STORE: "/app/data/moderation.json"
+      MODERATION_ADMIN_OPEN: "true"
       FEED_SNAPSHOT_REFRESH_SECONDS: "300"
       FEED_SNAPSHOT_AGE_HOURS: "24"
       RELAY_BACKEND_URL: "ws://smolgrrr-wired-pow-relay_relay_1:7777"

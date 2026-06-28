@@ -18,6 +18,11 @@ Persistent app data is stored under Umbrel app data:
 - `data/web/feed-bootstrap.json` for the feed snapshot cache,
 - `data/web/moderation.json` for moderation actions.
 
+The community app currently enables `MODERATION_ADMIN_OPEN=true` so the local
+Umbrel console can create moderation actions without a separate token. Before
+publishing the console on a public hostname, remove that flag and set
+`MODERATION_ADMIN_TOKEN`, or put the admin action paths behind Cloudflare Access.
+
 ## Install
 
 Add this repository as a Community App Store in umbrelOS, then install

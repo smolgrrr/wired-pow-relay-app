@@ -216,6 +216,8 @@ function isLocalRequest(req) {
 }
 
 function isAdminAuthorized(req) {
+  if (process.env.MODERATION_ADMIN_OPEN === "true") return true;
+
   const token = process.env.MODERATION_ADMIN_TOKEN;
   if (!token) return isLocalRequest(req) || process.env.NODE_ENV !== "production";
   return adminBearerToken(req) === token || req.headers["x-admin-token"] === token;

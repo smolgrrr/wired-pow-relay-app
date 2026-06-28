@@ -36,6 +36,7 @@ const enrichmentRelays = envList("ENRICHMENT_RELAYS", [
   "wss://relay.snort.social",
 ]);
 const threadRelays = [...new Set([...powRelays, ...enrichmentRelays])];
+const publicHosts = envList("PUBLIC_HOSTS", []).map(normalizeHost).filter(Boolean);
 
 const relayInfo = {
   name: process.env.RELAY_NAME || "Wired PoW Relay",
@@ -49,7 +50,7 @@ const relayInfo = {
   software:
     process.env.RELAY_SOFTWARE ||
     "https://github.com/smolgrrr/wired-pow-relay-app",
-  version: process.env.RELAY_VERSION || "0.2.0",
+  version: process.env.RELAY_VERSION || "0.2.1",
   limitation: {
     auth_required: false,
     payment_required: false,
@@ -89,6 +90,52 @@ function envList(name, fallback) {
     .map((value) => value.trim())
     .filter(Boolean);
   return values.length > 0 ? values : fallback;
+}
+
+function normalizeHost(value) {
+  const trimmed = String(value || "").trim().toLowerCase();
+  if (!trimmed) return "";
+
+  try {
+    return new URL(trimmed.includes("://") ? trimmed : `http://${trimmed}`).hostname
+      .replace(/\.$/, "");
+  } catch {
+    return trimmed.split(":")[0].replace(/\.$/, "");
+  }
+}
+
+function requestHost(req) {
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "")
+    .split(",")[0]
+    .trim();
+  return normalizeHost(forwardedHost || req.headers.host || "");
+}
+
+function isPublicHost(req) {
+  const host = requestHost(req);
+  return Boolean(host && publicHosts.includes(host));
+}
+
+function acceptsNostrJson(req) {
+  return String(req.headers.accept || "").includes("application/nostr+json");
+}
+
+function isPublicHttpRouteAllowed(req) {
+  const url = new URL(req.originalUrl || req.url || "/", "http://localhost");
+
+  if (url.pathname === "/") {
+    return req.method === "GET" && acceptsNostrJson(req);
+  }
+
+  if (url.pathname === "/api/feed/bootstrap") {
+    return req.method === "GET" || req.method === "OPTIONS";
+  }
+
+  if (url.pathname === "/api/moderation/manifest") {
+    return req.method === "GET" || req.method === "OPTIONS";
+  }
+
+  return false;
 }
 
 function addRecent(type, detail) {
@@ -216,6 +263,7 @@ function isLocalRequest(req) {
 }
 
 function isAdminAuthorized(req) {
+  if (isPublicHost(req)) return false;
   if (process.env.MODERATION_ADMIN_OPEN === "true") return true;
 
   const token = process.env.MODERATION_ADMIN_TOKEN;
@@ -932,10 +980,17 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "128kb" }));
 app.use((req, res, next) => {
   setCorsHeaders(res);
+
+  if (isPublicHost(req) && !isPublicHttpRouteAllowed(req)) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+
   if (req.method === "OPTIONS") {
     res.status(204).end();
     return;
   }
+
   next();
 });
 

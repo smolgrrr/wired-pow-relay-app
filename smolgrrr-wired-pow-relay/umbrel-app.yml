@@ -2,7 +2,7 @@ manifestVersion: 1
 id: smolgrrr-wired-pow-relay
 category: social
 name: Wired PoW Relay
-version: "0.2.0"
+version: "0.2.1"
 tagline: A proof-of-work Nostr relay and feed console for Wired
 description: >-
   Wired PoW Relay runs a strfry Nostr relay behind a lightweight gateway that
@@ -23,5 +23,6 @@ defaultPassword: ""
 deterministicPassword: false
 torOnly: false
 releaseNotes: >-
-  Adds a Wired-compatible feed bootstrap endpoint, moderation manifest/actions
-  API, persistent snapshot/moderation storage, and a combined relay console.
+  Keeps the Umbrel console and moderation management local-only while allowing
+  public hostnames to serve only relay traffic, feed snapshots, and moderation
+  manifests.

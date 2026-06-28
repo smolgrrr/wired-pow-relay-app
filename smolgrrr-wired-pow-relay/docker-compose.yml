@@ -8,7 +8,7 @@ services:
       PROXY_AUTH_ADD: "false"
 
   web:
-    image: ghcr.io/smolgrrr/wired-pow-relay-app-web:0.2.0
+    image: ghcr.io/smolgrrr/wired-pow-relay-app-web:0.2.1
     restart: on-failure
     stop_grace_period: 30s
     environment:
@@ -17,6 +17,7 @@ services:
       FEED_SNAPSHOT_CACHE_FILE: "/app/data/feed-bootstrap.json"
       WIRED_MODERATION_STORE: "/app/data/moderation.json"
       MODERATION_ADMIN_OPEN: "true"
+      PUBLIC_HOSTS: "wiredsignal.online,relay.wiredsignal.online"
       FEED_SNAPSHOT_REFRESH_SECONDS: "300"
       FEED_SNAPSHOT_AGE_HOURS: "24"
       RELAY_BACKEND_URL: "ws://smolgrrr-wired-pow-relay_relay_1:7777"
@@ -27,7 +28,7 @@ services:
       RELAY_ICON: "https://www.getwired.app/icon.png"
       RELAY_MIN_POW: "16"
       RELAY_SOFTWARE: "https://github.com/smolgrrr/wired-pow-relay-app"
-      RELAY_VERSION: "0.2.0"
+      RELAY_VERSION: "0.2.1"
     volumes:
       - ${APP_DATA_DIR}/data/web:/app/data
     depends_on:

@@ -36,7 +36,7 @@ const enrichmentRelays = envList("ENRICHMENT_RELAYS", [
   "wss://relay.snort.social",
 ]);
 const threadRelays = [...new Set([...powRelays, ...enrichmentRelays])];
-const publicHosts = envList("PUBLIC_HOSTS", []).map(normalizeHost).filter(Boolean);
+const publicHostPatterns = envList("PUBLIC_HOSTS", []).map(normalizeHost).filter(Boolean);
 
 const relayInfo = {
   name: process.env.RELAY_NAME || "Wired PoW Relay",
@@ -50,7 +50,7 @@ const relayInfo = {
   software:
     process.env.RELAY_SOFTWARE ||
     "https://github.com/smolgrrr/wired-pow-relay-app",
-  version: process.env.RELAY_VERSION || "0.2.2",
+  version: process.env.RELAY_VERSION || "0.2.3",
   limitation: {
     auth_required: false,
     payment_required: false,
@@ -113,7 +113,16 @@ function requestHost(req) {
 
 function isPublicHost(req) {
   const host = requestHost(req);
-  return Boolean(host && publicHosts.includes(host));
+  return Boolean(host && publicHostPatterns.some((pattern) => hostMatchesPattern(host, pattern)));
+}
+
+function hostMatchesPattern(host, pattern) {
+  if (pattern.startsWith("*.")) {
+    const suffix = pattern.slice(1);
+    return host.endsWith(suffix) && host.length > suffix.length;
+  }
+
+  return host === pattern;
 }
 
 function acceptsNostrJson(req) {

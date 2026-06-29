@@ -628,25 +628,36 @@ async function subscribeOnce(relays, filter, relayUrls) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      subscriptions.forEach((sub) => sub.close());
+      subscriptions.forEach((sub) => {
+        try {
+          sub.close();
+        } catch {
+          // Subscription already closed.
+        }
+      });
       resolve();
     };
 
     const timer = setTimeout(finish, snapshotTimeoutMs);
 
     for (const relay of targetRelays) {
-      const sub = relay.subscribe([filter], {
-        onevent(event) {
-          if (seenIds.has(event.id)) return;
-          seenIds.add(event.id);
-          events.push(event);
-        },
-        oneose() {
-          eoseCount += 1;
-          if (eoseCount >= targetRelays.length) finish();
-        },
-      });
-      subscriptions.push(sub);
+      try {
+        const sub = relay.subscribe([filter], {
+          onevent(event) {
+            if (seenIds.has(event.id)) return;
+            seenIds.add(event.id);
+            events.push(event);
+          },
+          oneose() {
+            eoseCount += 1;
+            if (eoseCount >= targetRelays.length) finish();
+          },
+        });
+        subscriptions.push(sub);
+      } catch {
+        eoseCount += 1;
+        if (eoseCount >= targetRelays.length) finish();
+      }
     }
   });
 

@@ -43,7 +43,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: smolgrrr-wired-pow-relay/web
+          context: smolgrrr-wired-admin/web
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

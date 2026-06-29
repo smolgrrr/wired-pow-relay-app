@@ -3,7 +3,7 @@ version: "3.7"
 services:
   app_proxy:
     environment:
-      APP_HOST: smolgrrr-wired-pow-relay_web_1
+      APP_HOST: smolgrrr-wired-admin_web_1
       APP_PORT: 3000
       PROXY_AUTH_ADD: "false"
 
@@ -20,12 +20,12 @@ services:
       PUBLIC_HOSTS: "wiredsignal.online,*.wiredsignal.online,*.vercel.app,*.onion"
       FEED_SNAPSHOT_REFRESH_SECONDS: "300"
       FEED_SNAPSHOT_AGE_HOURS: "24"
-      RELAY_BACKEND_URL: "ws://smolgrrr-wired-pow-relay_relay_1:7777"
+      RELAY_BACKEND_URL: "ws://smolgrrr-wired-admin_relay_1:7777"
       RELAY_NAME: "Wired Admin"
       RELAY_DESCRIPTION: "A Wired proof-of-work Nostr relay, feed snapshot service, and moderation console backed by strfry."
       RELAY_CONTACT: ""
       RELAY_PUBKEY: ""
-      RELAY_ICON: "https://raw.githubusercontent.com/smolgrrr/wired-admin/main/smolgrrr-wired-pow-relay/icon.png"
+      RELAY_ICON: "https://raw.githubusercontent.com/smolgrrr/wired-admin/main/smolgrrr-wired-admin/icon.png"
       RELAY_MIN_POW: "16"
       RELAY_SOFTWARE: "https://github.com/smolgrrr/wired-admin"
       RELAY_VERSION: "0.2.4"

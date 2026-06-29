@@ -35,7 +35,7 @@ Add this repository as a Community App Store in umbrelOS, then install
 ## Local development
 
 ```sh
-cd smolgrrr-wired-pow-relay
+cd smolgrrr-wired-admin
 docker compose up --build
 ```
 

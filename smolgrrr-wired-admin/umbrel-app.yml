@@ -1,8 +1,8 @@
 manifestVersion: 1
-id: smolgrrr-wired-pow-relay
+id: smolgrrr-wired-admin
 category: social
 name: Wired Admin
-icon: https://raw.githubusercontent.com/smolgrrr/wired-admin/main/smolgrrr-wired-pow-relay/icon.png
+icon: https://raw.githubusercontent.com/smolgrrr/wired-admin/main/smolgrrr-wired-admin/icon.png
 version: "0.2.4"
 tagline: Admin console for Wired relay, feed, and moderation
 description: >-

@@ -1,11 +1,12 @@
 manifestVersion: 1
 id: smolgrrr-wired-pow-relay
 category: social
-name: Wired PoW Relay
+name: Wired Admin
+icon: https://raw.githubusercontent.com/smolgrrr/wired-admin/main/smolgrrr-wired-pow-relay/icon.png
 version: "0.2.4"
-tagline: A proof-of-work Nostr relay and feed console for Wired
+tagline: Admin console for Wired relay, feed, and moderation
 description: >-
-  Wired PoW Relay runs a strfry Nostr relay behind a lightweight gateway that
+  Wired Admin runs a strfry Nostr relay behind a lightweight gateway that
   enforces NIP-13 proof-of-work before events reach the relay database. It also
   includes a local console for relay health, feed snapshot monitoring, and
   moderation actions used by Wired clients.
@@ -13,8 +14,8 @@ description: >-
 developer: smolgrrr
 website: https://www.getwired.app/
 dependencies: []
-repo: https://github.com/smolgrrr/wired-pow-relay-app
-support: https://github.com/smolgrrr/wired-pow-relay-app/issues
+repo: https://github.com/smolgrrr/wired-admin
+support: https://github.com/smolgrrr/wired-admin/issues
 port: 3000
 gallery: []
 path: ""

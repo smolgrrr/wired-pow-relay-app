@@ -1,5 +1,5 @@
 {
-  "name": "wired-pow-relay-web",
+  "name": "wired-admin-web",
   "version": "0.2.4",
   "type": "module",
   "private": true,

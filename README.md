@@ -1,6 +1,6 @@
-# Wired PoW Relay Umbrel App
+# Wired Admin Umbrel App
 
-Community Umbrel app store for a Wired-oriented Nostr proof-of-work relay.
+Community Umbrel app store for Wired's relay, snapshot, and moderation admin service.
 
 The app runs a `strfry` relay as the durable backend and exposes a small Node
 gateway that:
@@ -9,7 +9,7 @@ gateway that:
 - exposes NIP-11 relay metadata,
 - proxies Nostr WebSocket traffic to `strfry`,
 - rejects publish attempts that do not meet the configured NIP-13 PoW floor,
-- serves a Wired-compatible feed bootstrap snapshot at `/api/feed/bootstrap`,
+- serves a Wired feed bootstrap snapshot at `/api/feed/bootstrap`,
 - serves public client-side moderation filtering data at `/api/moderation/manifest`,
 - keeps moderation management actions local to the Umbrel app.
 
@@ -30,7 +30,7 @@ frontend origins and only need the public snapshot/manifest/relay endpoints.
 ## Install
 
 Add this repository as a Community App Store in umbrelOS, then install
-`Wired PoW Relay`.
+`Wired Admin`.
 
 ## Local development
 

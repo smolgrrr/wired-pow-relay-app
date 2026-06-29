@@ -8,7 +8,7 @@ services:
       PROXY_AUTH_ADD: "false"
 
   web:
-    image: ghcr.io/smolgrrr/wired-pow-relay-app-web:0.2.4
+    image: ghcr.io/smolgrrr/wired-admin-web:0.2.4
     restart: on-failure
     stop_grace_period: 30s
     environment:
@@ -21,13 +21,13 @@ services:
       FEED_SNAPSHOT_REFRESH_SECONDS: "300"
       FEED_SNAPSHOT_AGE_HOURS: "24"
       RELAY_BACKEND_URL: "ws://smolgrrr-wired-pow-relay_relay_1:7777"
-      RELAY_NAME: "Wired PoW Relay"
+      RELAY_NAME: "Wired Admin"
       RELAY_DESCRIPTION: "A Wired proof-of-work Nostr relay, feed snapshot service, and moderation console backed by strfry."
       RELAY_CONTACT: ""
       RELAY_PUBKEY: ""
-      RELAY_ICON: "https://www.getwired.app/icon.png"
+      RELAY_ICON: "https://raw.githubusercontent.com/smolgrrr/wired-admin/main/smolgrrr-wired-pow-relay/icon.png"
       RELAY_MIN_POW: "16"
-      RELAY_SOFTWARE: "https://github.com/smolgrrr/wired-pow-relay-app"
+      RELAY_SOFTWARE: "https://github.com/smolgrrr/wired-admin"
       RELAY_VERSION: "0.2.4"
     volumes:
       - ${APP_DATA_DIR}/data/web:/app/data

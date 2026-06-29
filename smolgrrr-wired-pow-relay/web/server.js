@@ -39,7 +39,7 @@ const threadRelays = [...new Set([...powRelays, ...enrichmentRelays])];
 const publicHostPatterns = envList("PUBLIC_HOSTS", []).map(normalizeHost).filter(Boolean);
 
 const relayInfo = {
-  name: process.env.RELAY_NAME || "Wired PoW Relay",
+  name: process.env.RELAY_NAME || "Wired Admin",
   description:
     process.env.RELAY_DESCRIPTION ||
     "A Wired proof-of-work Nostr relay backed by strfry.",
@@ -49,7 +49,7 @@ const relayInfo = {
   supported_nips: [1, 9, 11, 13, 15, 20, 22, 33, 40],
   software:
     process.env.RELAY_SOFTWARE ||
-    "https://github.com/smolgrrr/wired-pow-relay-app",
+    "https://github.com/smolgrrr/wired-admin",
   version: process.env.RELAY_VERSION || "0.2.4",
   limitation: {
     auth_required: false,
@@ -1180,7 +1180,7 @@ await mkdir(dataDir, { recursive: true });
 await loadSnapshotFromDisk();
 
 server.listen(port, "0.0.0.0", () => {
-  console.log(`Wired PoW Relay gateway listening on ${port}`);
+  console.log(`Wired Admin gateway listening on ${port}`);
   console.log(`Proxying Nostr traffic to ${backendUrl}`);
   console.log(`Feed snapshot cache: ${snapshotCacheFile}`);
 });

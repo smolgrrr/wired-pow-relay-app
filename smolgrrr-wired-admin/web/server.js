@@ -10,7 +10,6 @@ import {
   getPublicKey,
   nip19,
   Relay,
-  verifyEvent,
 } from "nostr-tools";
 import WebSocket, { WebSocketServer } from "ws";
 
@@ -57,7 +56,6 @@ const confessPublishTimeoutMs = Math.max(
   1000,
   Number(process.env.CONFESS_PUBLISH_TIMEOUT_MS || 8000),
 );
-const confessMentionPubkeys = envList("CONFESS_MENTION_PUBKEYS", []);
 const publicHostPatterns = envList("PUBLIC_HOSTS", []).map(normalizeHost).filter(Boolean);
 
 const relayInfo = {
@@ -540,8 +538,10 @@ function confessStatusFromStore(store, now = Date.now()) {
   const posts = todaysConfessPosts(store, now);
   const count = posts.length;
   const remaining = Math.max(0, confessDailyLimit - count);
+  const secretKey = parseConfessSecretKey();
   return {
-    configured: Boolean(parseConfessSecretKey()),
+    configured: Boolean(secretKey),
+    pubkey: secretKey ? getPublicKey(secretKey) : "",
     day,
     count,
     limit: confessDailyLimit,
@@ -592,12 +592,12 @@ function hasDisallowedConfessContent(content) {
   return disallowedConfessContentPattern.test(String(content || ""));
 }
 
-function validateConfessAdmission(event, requiredPow) {
+function validateConfessAdmission(event, requiredPow, confessPubkey) {
   const result = verifyPow(event, requiredPow);
   if (!result.ok) return result;
 
-  if (!verifyEvent(event)) {
-    return { ok: false, reason: "invalid event signature", pow: result.pow };
+  if (event.pubkey !== confessPubkey) {
+    return { ok: false, reason: "confess proof pubkey does not match account", pow: result.pow };
   }
 
   if (event.kind !== 1) {
@@ -624,61 +624,14 @@ function validateConfessAdmission(event, requiredPow) {
   return { ok: true, reason: "", pow: result.pow };
 }
 
-function addUniqueTag(tags, tag) {
-  const key = `${tag[0]}:${tag[1] || ""}:${tag[2] || ""}`;
-  if (tags.some((existing) => `${existing[0]}:${existing[1] || ""}:${existing[2] || ""}` === key)) {
-    return;
-  }
-  tags.push(tag);
-}
-
-const nostrRefPattern = /\b(?:nostr:)?(?:note|nevent|npub|nprofile)1[a-z0-9]+/gi;
-
-function tagsFromNostrRefs(content) {
-  const tags = [];
-  for (const match of String(content || "").matchAll(nostrRefPattern)) {
-    const ref = match[0].startsWith("nostr:") ? match[0].slice(6) : match[0];
-    try {
-      const decoded = nip19.decode(ref);
-      if (decoded.type === "note" && typeof decoded.data === "string") {
-        addUniqueTag(tags, ["e", decoded.data]);
-      }
-      if (decoded.type === "nevent" && decoded.data?.id) {
-        const relay = decoded.data.relays?.[0];
-        addUniqueTag(tags, relay ? ["e", decoded.data.id, relay] : ["e", decoded.data.id]);
-      }
-      if (decoded.type === "npub" && typeof decoded.data === "string") {
-        addUniqueTag(tags, ["p", decoded.data]);
-      }
-      if (decoded.type === "nprofile" && decoded.data?.pubkey) {
-        addUniqueTag(tags, ["p", decoded.data.pubkey]);
-      }
-    } catch {
-      // Invalid inline Nostr refs are left as plain content.
-    }
-  }
-  return tags;
-}
-
-function buildConfessionEvent(admissionEvent, pow, secretKey) {
-  const content = admissionEvent.content.trim();
-  const tags = [
-    ["client", "wired-confess"],
-    ["proof", admissionEvent.id, String(pow)],
-  ];
-
-  confessMentionPubkeys.forEach((pubkey) => {
-    if (/^[0-9a-f]{64}$/i.test(pubkey)) addUniqueTag(tags, ["p", pubkey.toLowerCase()]);
-  });
-
-  tagsFromNostrRefs(content).forEach((tag) => addUniqueTag(tags, tag));
-
+function buildConfessionEvent(admissionEvent, secretKey) {
   return finalizeEvent(
     {
-      kind: 1,
-      content,
-      tags,
-      created_at: Math.floor(Date.now() / 1000),
+      kind: admissionEvent.kind,
+      content: admissionEvent.content.trim(),
+      tags: admissionEvent.tags,
+      created_at: admissionEvent.created_at,
+      pubkey: admissionEvent.pubkey,
     },
     secretKey,
   );
@@ -740,7 +693,8 @@ async function createConfession(admissionEvent) {
       throw error;
     }
 
-    const proof = validateConfessAdmission(admissionEvent, status.minimumPow);
+    const confessPubkey = getPublicKey(secretKey);
+    const proof = validateConfessAdmission(admissionEvent, status.minimumPow, confessPubkey);
     if (!proof.ok) {
       const error = new Error(proof.reason);
       error.statusCode = 400;
@@ -748,7 +702,7 @@ async function createConfession(admissionEvent) {
       throw error;
     }
 
-    const event = buildConfessionEvent(admissionEvent, proof.pow, secretKey);
+    const event = buildConfessionEvent(admissionEvent, secretKey);
     const acceptedRelays = await publishConfessionEvent(event);
     if (acceptedRelays.length === 0) {
       const error = new Error("no relay accepted the confession");

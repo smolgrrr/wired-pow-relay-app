@@ -18,7 +18,6 @@ Persistent app data is stored under Umbrel app data:
 - `data/strfry` for the relay database,
 - `data/web/feed-bootstrap.json` for the feed snapshot cache,
 - `data/web/moderation.json` for moderation actions.
-- `data/web/confess-x-tokens.json` for the optional Confess X OAuth token store.
 
 The community app enables `MODERATION_ADMIN_OPEN=true` for the local Umbrel
 console only. Hosts listed in `PUBLIC_HOSTS` cannot access the UI,
@@ -48,29 +47,17 @@ The Confess X mirror is server-side only and disabled by default. A Confess
 submission publishes to Nostr first; X posting is queued afterward and X
 rejection or downtime does not block the Nostr confession.
 
-The mirror uses X OAuth2 with the minimum scopes needed for posting:
-
-```text
-tweet.read users.read tweet.write offline.access
-```
-
-Create a token store for the dedicated X account from `smolgrrr-wired-admin/web`:
-
-```sh
-CONFESS_X_CLIENT_ID=... CONFESS_X_CLIENT_SECRET=... npm run confess:x:oauth
-```
-
-The script prints an X authorization URL. Open it as the dedicated X account,
-then paste the full `http://localhost:8080/callback?...` URL back into the
-terminal. The callback page may fail to load on a remote host; the code in the
-address bar is enough.
+The mirror uses X OAuth1 user-context credentials generated for the dedicated X
+account. OAuth2 is not used.
 
 Runtime environment:
 
 - `CONFESS_X_ENABLED`: set `true` to queue mirror attempts.
 - `CONFESS_X_DRY_RUN`: defaults to `true`; set `false` only when ready to post.
-- `CONFESS_X_CLIENT_ID` and `CONFESS_X_CLIENT_SECRET`: OAuth2 app credentials.
-- `CONFESS_X_TOKEN_STORE_FILE`: defaults to `/app/data/confess-x-tokens.json`.
+- `CONFESS_X_OAUTH1_API_KEY`: app API key.
+- `CONFESS_X_OAUTH1_API_SECRET`: app API key secret.
+- `CONFESS_X_OAUTH1_ACCESS_TOKEN`: dedicated account access token.
+- `CONFESS_X_OAUTH1_ACCESS_SECRET`: dedicated account access token secret.
 - `CONFESS_X_ACCOUNT_HANDLE`: optional operator label for status output.
 
 Before posting, the backend applies conservative X safety gates: no links/media,

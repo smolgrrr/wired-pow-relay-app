@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -56,6 +57,30 @@ const confessPublishTimeoutMs = Math.max(
   1000,
   Number(process.env.CONFESS_PUBLISH_TIMEOUT_MS || 8000),
 );
+const confessXTokenStoreFile =
+  process.env.CONFESS_X_TOKEN_STORE_FILE || path.join(dataDir, "confess-x-tokens.json");
+const confessXRetrySeconds = Math.max(30, Number(process.env.CONFESS_X_RETRY_SECONDS || 300));
+const confessXMaxAttempts = Math.max(1, Number(process.env.CONFESS_X_MAX_ATTEMPTS || 6));
+const confessXPostTimeoutMs = Math.max(
+  1000,
+  Number(process.env.CONFESS_X_POST_TIMEOUT_MS || 8000),
+);
+const confessXMaxLength = Math.max(
+  1,
+  Math.min(280, Number(process.env.CONFESS_X_MAX_LENGTH || 260)),
+);
+const confessXConfig = {
+  enabled: envFlag("CONFESS_X_ENABLED", false),
+  dryRun: envFlag("CONFESS_X_DRY_RUN", true),
+  clientId: String(process.env.CONFESS_X_CLIENT_ID || "").trim(),
+  clientSecret: String(process.env.CONFESS_X_CLIENT_SECRET || "").trim(),
+  accessToken: String(process.env.CONFESS_X_ACCESS_TOKEN || "").trim(),
+  refreshToken: String(process.env.CONFESS_X_REFRESH_TOKEN || "").trim(),
+  accountHandle: String(process.env.CONFESS_X_ACCOUNT_HANDLE || "").trim().replace(/^@/, ""),
+  postPrefix: String(process.env.CONFESS_X_POST_PREFIX || "").trim(),
+  postSuffix: String(process.env.CONFESS_X_POST_SUFFIX || "").trim(),
+  safetyMode: String(process.env.CONFESS_X_SAFETY_MODE || "strict").trim().toLowerCase(),
+};
 const publicHostPatterns = envList("PUBLIC_HOSTS", []).map(normalizeHost).filter(Boolean);
 
 const relayInfo = {
@@ -112,6 +137,8 @@ let snapshot = null;
 let lastRefreshError = null;
 let refreshPromise = null;
 let confessLedgerQueue = Promise.resolve();
+let confessXMirrorTimer = null;
+const confessXMirrorInFlight = new Set();
 
 function envList(name, fallback) {
   const raw = process.env[name];
@@ -121,6 +148,12 @@ function envList(name, fallback) {
     .map((value) => value.trim())
     .filter(Boolean);
   return values.length > 0 ? values : fallback;
+}
+
+function envFlag(name, fallback = false) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  return /^(1|true|yes|on)$/i.test(String(raw).trim());
 }
 
 function normalizeHost(value) {
@@ -669,6 +702,426 @@ async function publishConfessionEvent(event) {
   );
 }
 
+function confessXConfigured() {
+  return Boolean(
+    confessXConfig.dryRun ||
+      confessXConfig.accessToken ||
+      (confessXConfig.clientId &&
+        (confessXConfig.refreshToken || existsSync(confessXTokenStoreFile))),
+  );
+}
+
+function normalizeConfessXText(content) {
+  return String(content || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hashConfessXText(text) {
+  return crypto.createHash("sha256").update(normalizeConfessXText(text)).digest("hex");
+}
+
+function joinConfessXText(parts) {
+  return parts
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function buildConfessXPostText(content) {
+  return joinConfessXText([
+    confessXConfig.postPrefix,
+    String(content || "").trim(),
+    confessXConfig.postSuffix,
+  ]);
+}
+
+const xMentionPattern = /(^|[^a-z0-9_])@[a-z0-9_]{1,15}\b/i;
+const xHashtagPattern = /(^|[^a-z0-9_])#[\p{L}\p{N}_]+/iu;
+const xCashtagPattern = /(^|[^a-z0-9_])\$[a-z]{1,8}\b/i;
+const xEmailPattern = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i;
+const xPhonePattern = /\b(?:\+?\d[\s().-]*){10,}\b/;
+const xPaymentCardPattern = /\b(?:\d[ -]*?){13,19}\b/;
+const xStreetAddressPattern =
+  /\b\d{1,6}\s+[a-z0-9.'-]+(?:\s+[a-z0-9.'-]+){0,5}\s+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|court|ct|way|place|pl)\b/i;
+const xThreatPattern =
+  /\b(?:kys|kill\s+(?:yourself|you|him|her|them|all)|murder\s+(?:you|him|her|them)|shoot\s+(?:you|him|her|them)|stab\s+(?:you|him|her|them)|bomb\s+(?:you|him|her|them|the)|beat\s+(?:you|him|her|them)\s+up)\b/i;
+const xSelfHarmEncouragementPattern =
+  /\b(?:you should\s+(?:die|end it|hurt yourself)|go\s+(?:die|kill yourself)|how to\s+(?:kill yourself|self harm))\b/i;
+const xHarassmentPattern =
+  /\b(?:doxx?|swat|worthless|subhuman|vermin|degenerate|predator|rapist|groomer)\b/i;
+const xHatefulTargetPattern =
+  /\b(?:all|every)\s+(?:women|men|jews|muslims|christians|black people|white people|asians|immigrants|disabled people|gay people|trans people)\s+(?:are|should|must|deserve)\b/i;
+const xSexualMinorPattern =
+  /\b(?:minor|child|kid|teen|underage|schoolgirl|schoolboy)\b.{0,40}\b(?:sex|nude|porn|explicit|hookup)\b/i;
+const xScamPattern =
+  /\b(?:send\s+crypto|seed phrase|private key|guaranteed\s+(?:profit|returns)|double your money|pump and dump|buy followers)\b/i;
+
+function validateConfessXSafety(text, store, eventId) {
+  const content = String(text || "").trim();
+  if (!content) return { ok: false, reason: "empty X post" };
+  if (content.length > confessXMaxLength) {
+    return { ok: false, reason: `X post exceeds ${confessXMaxLength} characters` };
+  }
+  if (hasDisallowedConfessContent(content)) {
+    return { ok: false, reason: "links and media are not allowed on X mirror" };
+  }
+  if (xMentionPattern.test(content)) return { ok: false, reason: "X mentions are not allowed" };
+  if (xHashtagPattern.test(content)) return { ok: false, reason: "X hashtags are not allowed" };
+  if (xCashtagPattern.test(content)) return { ok: false, reason: "X cashtags are not allowed" };
+  if (
+    xEmailPattern.test(content) ||
+    xPhonePattern.test(content) ||
+    xPaymentCardPattern.test(content) ||
+    xStreetAddressPattern.test(content)
+  ) {
+    return { ok: false, reason: "possible private information" };
+  }
+  if (xThreatPattern.test(content)) return { ok: false, reason: "possible violent threat" };
+  if (xSelfHarmEncouragementPattern.test(content)) {
+    return { ok: false, reason: "possible self-harm encouragement" };
+  }
+  if (confessXConfig.safetyMode === "strict") {
+    if (xHarassmentPattern.test(content)) {
+      return { ok: false, reason: "possible targeted harassment" };
+    }
+    if (xHatefulTargetPattern.test(content)) {
+      return { ok: false, reason: "possible hateful conduct" };
+    }
+    if (xSexualMinorPattern.test(content)) {
+      return { ok: false, reason: "possible sexual minor content" };
+    }
+    if (xScamPattern.test(content)) return { ok: false, reason: "possible scam content" };
+  }
+
+  const textHash = hashConfessXText(content);
+  const duplicate = (store.posts || []).some(
+    (post) => post.eventId !== eventId && post.xMirror?.textHash === textHash,
+  );
+  if (duplicate) return { ok: false, reason: "duplicate X mirror text" };
+
+  return { ok: true, reason: "", textHash };
+}
+
+function initialConfessXMirror(event, store) {
+  const now = Date.now();
+  const text = buildConfessXPostText(event.content);
+  const base = {
+    enabled: confessXConfig.enabled,
+    dryRun: confessXConfig.dryRun,
+    accountHandle: confessXConfig.accountHandle || null,
+    updatedAt: now,
+  };
+
+  if (!confessXConfig.enabled) {
+    return { ...base, status: "disabled", reason: "X mirror disabled" };
+  }
+
+  if (!confessXConfigured()) {
+    return { ...base, status: "failed", reason: "X mirror is not configured", retryable: false };
+  }
+
+  const safety = validateConfessXSafety(text, store, event.id);
+  if (!safety.ok) {
+    return {
+      ...base,
+      status: "blocked",
+      reason: safety.reason,
+      retryable: false,
+      textLength: text.length,
+    };
+  }
+
+  return {
+    ...base,
+    status: "pending",
+    reason: "",
+    retryable: true,
+    attempts: 0,
+    nextAttemptAt: now,
+    text,
+    textHash: safety.textHash,
+    textLength: text.length,
+  };
+}
+
+async function readConfessXTokenStore() {
+  try {
+    const parsed = JSON.parse(await readFile(confessXTokenStoreFile, "utf8"));
+    if (parsed?.version === 1) return parsed;
+  } catch {
+    // Missing or malformed token stores fall back to env tokens.
+  }
+  return { version: 1 };
+}
+
+async function writeConfessXTokenStore(data) {
+  await mkdir(path.dirname(confessXTokenStoreFile), { recursive: true });
+  const temp = `${confessXTokenStoreFile}.${process.pid}.tmp`;
+  await writeFile(temp, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await rename(temp, confessXTokenStoreFile);
+}
+
+async function refreshConfessXAccessToken() {
+  const tokenStore = await readConfessXTokenStore();
+  const refreshToken = tokenStore.refreshToken || confessXConfig.refreshToken;
+  if (!refreshToken || !confessXConfig.clientId) {
+    throw new Error("X refresh token is not configured");
+  }
+
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+  });
+  const headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+  if (confessXConfig.clientSecret) {
+    headers.Authorization = `Basic ${Buffer.from(
+      `${confessXConfig.clientId}:${confessXConfig.clientSecret}`,
+    ).toString("base64")}`;
+  } else {
+    body.set("client_id", confessXConfig.clientId);
+  }
+
+  const response = await withTimeout(
+    fetch("https://api.x.com/2/oauth2/token", {
+      method: "POST",
+      headers,
+      body,
+    }),
+    confessXPostTimeoutMs,
+    "X token refresh",
+  );
+  const payload = await readJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(`X token refresh failed (${response.status}): ${summarizeXError(payload)}`);
+  }
+  if (!payload?.access_token) {
+    throw new Error("X token refresh did not return an access token");
+  }
+
+  const nextStore = {
+    version: 1,
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token || refreshToken,
+    tokenType: payload.token_type || "bearer",
+    scope: payload.scope || "",
+    expiresAt: Date.now() + Math.max(60, Number(payload.expires_in || 7200) - 60) * 1000,
+    updatedAt: Date.now(),
+  };
+  await writeConfessXTokenStore(nextStore);
+  return nextStore.accessToken;
+}
+
+async function getConfessXAccessToken() {
+  const tokenStore = await readConfessXTokenStore();
+  if (tokenStore.accessToken && Number(tokenStore.expiresAt || 0) > Date.now() + 60_000) {
+    return tokenStore.accessToken;
+  }
+  if (confessXConfig.accessToken) return confessXConfig.accessToken;
+  return refreshConfessXAccessToken();
+}
+
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text.slice(0, 500) };
+  }
+}
+
+function summarizeXError(payload) {
+  if (!payload) return "empty response";
+  if (typeof payload.detail === "string") return payload.detail;
+  if (typeof payload.title === "string") return payload.title;
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    return payload.errors
+      .map((error) => error.detail || error.message || error.title || String(error))
+      .join("; ")
+      .slice(0, 300);
+  }
+  return JSON.stringify(payload).slice(0, 300);
+}
+
+function nextConfessXAttemptAt(attempts) {
+  const delay = confessXRetrySeconds * 1000 * 2 ** Math.max(0, attempts - 1);
+  return Date.now() + Math.min(delay, 24 * 60 * 60 * 1000);
+}
+
+function failedConfessXMirror(existing, reason, retryable) {
+  const attempts = Number(existing?.attempts || 0) + 1;
+  const canRetry = Boolean(retryable && attempts < confessXMaxAttempts);
+  return {
+    ...existing,
+    status: "failed",
+    reason,
+    retryable: canRetry,
+    attempts,
+    nextAttemptAt: canRetry ? nextConfessXAttemptAt(attempts) : null,
+    updatedAt: Date.now(),
+  };
+}
+
+async function postConfessXText(text, existingMirror) {
+  if (confessXConfig.dryRun) {
+    return {
+      ...existingMirror,
+      status: "dry_run",
+      reason: "X dry-run mode",
+      retryable: false,
+      attempts: Number(existingMirror?.attempts || 0) + 1,
+      nextAttemptAt: null,
+      postedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  let accessToken = await getConfessXAccessToken();
+  let response = await postConfessXRequest(accessToken, text);
+  if (response.status === 401 && confessXConfig.clientId) {
+    accessToken = await refreshConfessXAccessToken();
+    response = await postConfessXRequest(accessToken, text);
+  }
+
+  const payload = await readJsonResponse(response);
+  if (response.ok && payload?.data?.id) {
+    return {
+      ...existingMirror,
+      status: "posted",
+      reason: "",
+      retryable: false,
+      attempts: Number(existingMirror?.attempts || 0) + 1,
+      tweetId: payload.data.id,
+      nextAttemptAt: null,
+      postedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  const reason = `X post failed (${response.status}): ${summarizeXError(payload)}`;
+  const retryable = response.status === 429 || response.status >= 500;
+  return failedConfessXMirror(existingMirror, reason, retryable);
+}
+
+async function postConfessXRequest(accessToken, text) {
+  if (!accessToken) throw new Error("X access token is not configured");
+  return withTimeout(
+    fetch("https://api.x.com/2/tweets", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text }),
+    }),
+    confessXPostTimeoutMs,
+    "X post",
+  );
+}
+
+async function updateConfessXMirror(eventId, updater) {
+  return withConfessLedgerLock(async () => {
+    const store = await readConfessStore();
+    const post = store.posts.find((candidate) => candidate.eventId === eventId);
+    if (!post) return null;
+    post.xMirror = await updater(post.xMirror || {});
+    await writeConfessStore(store);
+    return post.xMirror;
+  });
+}
+
+async function processConfessXMirror(eventId, mirror) {
+  if (!mirror || !["pending", "failed"].includes(mirror.status)) return mirror;
+  if (!mirror.retryable || Number(mirror.nextAttemptAt || 0) > Date.now()) return mirror;
+  if (!mirror.text) {
+    return updateConfessXMirror(eventId, (current) =>
+      failedConfessXMirror(current, "X mirror text is missing", false),
+    );
+  }
+  if (confessXMirrorInFlight.has(eventId)) return mirror;
+
+  confessXMirrorInFlight.add(eventId);
+  try {
+    const nextMirror = await postConfessXText(mirror.text, mirror);
+    await updateConfessXMirror(eventId, () => nextMirror);
+    return nextMirror;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "X mirror failed";
+    return updateConfessXMirror(eventId, (current) => failedConfessXMirror(current, reason, true));
+  } finally {
+    confessXMirrorInFlight.delete(eventId);
+  }
+}
+
+function scheduleConfessXMirror(eventId, mirror) {
+  if (!confessXConfig.enabled) return;
+  if (!mirror || !["pending", "failed"].includes(mirror.status)) return;
+  const timer = setTimeout(() => {
+    void processConfessXMirror(eventId, mirror).catch((error) => {
+      console.error(error instanceof Error ? error.message : "X mirror failed");
+    });
+  }, 0);
+  timer.unref();
+}
+
+async function processPendingConfessXMirrors() {
+  if (!confessXConfig.enabled) return;
+  const store = await readConfessStore();
+  const duePosts = (store.posts || []).filter(
+    (post) =>
+      post.eventId &&
+      ["pending", "failed"].includes(post.xMirror?.status) &&
+      post.xMirror?.retryable !== false &&
+      Number(post.xMirror?.nextAttemptAt || 0) <= Date.now(),
+  );
+  for (const post of duePosts) {
+    await processConfessXMirror(post.eventId, post.xMirror);
+  }
+}
+
+function confessXStatusFromStore(store) {
+  const counts = {
+    disabled: 0,
+    pending: 0,
+    posted: 0,
+    blocked: 0,
+    failed: 0,
+    dry_run: 0,
+  };
+  for (const post of store.posts || []) {
+    const status = post.xMirror?.status;
+    if (Object.hasOwn(counts, status)) counts[status] += 1;
+  }
+  return {
+    enabled: confessXConfig.enabled,
+    dryRun: confessXConfig.dryRun,
+    configured: confessXConfigured(),
+    accountHandle: confessXConfig.accountHandle || null,
+    safetyMode: confessXConfig.safetyMode,
+    maxLength: confessXMaxLength,
+    retrySeconds: confessXRetrySeconds,
+    maxAttempts: confessXMaxAttempts,
+    counts,
+  };
+}
+
+function publicConfessXMirror(mirror) {
+  if (!mirror) return { status: "disabled" };
+  return {
+    status: mirror.status,
+    reason: mirror.reason || undefined,
+    tweetId: mirror.tweetId || undefined,
+    retryable: mirror.retryable,
+    attempts: mirror.attempts,
+    nextAttemptAt: mirror.nextAttemptAt,
+    accountHandle: mirror.accountHandle || undefined,
+  };
+}
+
 async function createConfession(admissionEvent) {
   const secretKey = parseConfessSecretKey();
   if (!secretKey) {
@@ -677,7 +1130,7 @@ async function createConfession(admissionEvent) {
     throw error;
   }
 
-  return withConfessLedgerLock(async () => {
+  const result = await withConfessLedgerLock(async () => {
     const store = await readConfessStore();
     const status = confessStatusFromStore(store);
 
@@ -717,10 +1170,12 @@ async function createConfession(admissionEvent) {
       pow: proof.pow,
       createdAt: Date.now(),
       acceptedRelays,
+      xMirror: initialConfessXMirror(event, store),
     });
     await writeConfessStore(store);
 
     const nextStatus = confessStatusFromStore(store);
+    const post = store.posts.find((candidate) => candidate.eventId === event.id);
     return {
       event,
       acceptedRelays,
@@ -728,8 +1183,15 @@ async function createConfession(admissionEvent) {
       remaining: nextStatus.remaining,
       minimumPow: nextStatus.minimumPow,
       nextResetAt: nextStatus.nextResetAt,
+      xMirror: post?.xMirror,
     };
   });
+
+  scheduleConfessXMirror(result.event.id, result.xMirror);
+  return {
+    ...result,
+    xMirror: publicConfessXMirror(result.xMirror),
+  };
 }
 
 const httpUrlPattern = /https?:\/\/[^\s<>"')\]]+/gi;
@@ -1342,6 +1804,7 @@ app.get("/api/status", async (_req, res) => {
       storeFile: confessStoreFile,
       relays: confessRelays,
       linkedPubkey: confessSecretKey ? getPublicKey(confessSecretKey) : null,
+      xMirror: confessXStatusFromStore(confessStore),
     },
     moderation: {
       actionCount: actions.length,
@@ -1402,7 +1865,16 @@ app.get("/healthz", (_req, res) => {
 
 app.get("/api/confess/status", async (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  res.json(confessStatusFromStore(await readConfessStore()));
+  const store = await readConfessStore();
+  res.json({
+    ...confessStatusFromStore(store),
+    xMirror: {
+      enabled: confessXConfig.enabled,
+      dryRun: confessXConfig.dryRun,
+      configured: confessXConfigured(),
+      accountHandle: confessXConfig.accountHandle || null,
+    },
+  });
 });
 
 app.post("/api/confess", async (req, res) => {
@@ -1519,4 +1991,16 @@ if (refreshSeconds > 0) {
       console.error(lastRefreshError || "scheduled refresh failed");
     });
   }, refreshSeconds * 1000).unref();
+}
+
+if (confessXConfig.enabled) {
+  void processPendingConfessXMirrors().catch((error) => {
+    console.error(error instanceof Error ? error.message : "initial X mirror retry failed");
+  });
+  confessXMirrorTimer = setInterval(() => {
+    void processPendingConfessXMirrors().catch((error) => {
+      console.error(error instanceof Error ? error.message : "scheduled X mirror retry failed");
+    });
+  }, confessXRetrySeconds * 1000);
+  confessXMirrorTimer.unref();
 }

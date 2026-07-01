@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js"
+    "check": "node --check server.js",
+    "confess:x:oauth": "node scripts/confess-x-oauth.js"
   },
   "dependencies": {
     "express": "^4.19.2",
